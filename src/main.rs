@@ -1,8 +1,8 @@
 use anyhow::{bail, Context};
 use clap::{Arg, ArgGroup, Command};
+use later::*;
 use std::collections::HashMap;
 use std::io::Read;
-use later::*;
 
 fn main() -> anyhow::Result<()> {
     let matches = Command::new("todo")
@@ -103,12 +103,16 @@ fn main() -> anyhow::Result<()> {
         ])
         .get_matches();
 
-    let todo_file = if let Some(mut path) = dirs::data_local_dir() {
-        path.push("todo/todo.json");
+    let mut todo_file = if let Some(mut path) = dirs::data_local_dir() {
+        path.push("later");
         path
     } else {
         bail!("Could not find standard local data directory.")
     };
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .create(todo_file.clone())?;
+    todo_file.push("later.json");
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
