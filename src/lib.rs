@@ -9,7 +9,7 @@ pub const DEFAULT_LIST: &str = "to-do";
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum DateMaybeTime {
     Date(NaiveDate),
-    DateTime(DateTime<Utc>),
+    DateTime(DateTime<Local>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,7 +46,7 @@ impl DateMaybeTime {
                 }
                 .and_time(time.unwrap());
                 let local_time = Local.from_local_datetime(&datetime).unwrap();
-                Some(DateMaybeTime::DateTime(DateTime::<Utc>::from(local_time)))
+                Some(DateMaybeTime::DateTime(local_time))
             }
         }
     }
@@ -159,7 +159,7 @@ impl TodoList {
             date: None,
             list: vec![ListItem::Entry(TodoEntry {
                 title: String::from("Hello, world!"),
-                date: Some(DateMaybeTime::DateTime(Utc::now())),
+                date: Some(DateMaybeTime::DateTime(Local::now())),
             })],
         }
     }
