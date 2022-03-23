@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::io::Read;
 
 fn main() -> anyhow::Result<()> {
-    let matches = Command::new("todo")
+    let matches = Command::new("later")
         .about("Autumn's to-do list program")
+        .long_about("This program allows nested lists. The index of a nested list should be given as a comma-separated list of integers starting with the top-level list index. e.g. `later add 1,3,1,2`")
         .arg(
             Arg::new("list-name")
                 .help("name of to-do list")
@@ -208,7 +209,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             if lists.len() == 1 {
-                eprintln!("No named lists exist currently. (Use `todo list --add` to create one.)");
+                eprintln!("No named lists exist currently. (Use `later list --add` to create one.)");
             } else {
                 let mut v: Vec<(&String, &TodoList)> = lists.iter().collect();
                 v.sort_by_key(|(title, _)| *title);
