@@ -215,8 +215,9 @@ fn main() -> anyhow::Result<()> {
                 v.sort_by_key(|(title, _)| *title);
                 v.iter()
                     .filter(|(title, _)| *title != DEFAULT_LIST)
-                    .map(|(_, list)| list.write_header(&mut stdout))
-                    .for_each(drop);
+                    .for_each(|(_, list)| {
+                        list.write_header(&mut stdout).unwrap()
+                    });
             }
             return Ok(());
         }
