@@ -153,6 +153,7 @@ impl TodoEntry {
 }
 
 impl TodoList {
+    // create default list
     pub fn default() -> TodoList {
         TodoList {
             title: String::from(DEFAULT_LIST),
@@ -163,6 +164,7 @@ impl TodoList {
             })],
         }
     }
+
     pub fn from_info(title: String, date: Option<DateMaybeTime>) -> TodoList {
         TodoList {
             title,
@@ -360,6 +362,28 @@ impl TodoList {
                 bail!("Invalid index! (too big)")
             }
         }
+    }
+
+    pub fn sort(&mut self) {
+        for item in self.list.iter_mut() {
+            if let ListItem::List(sublist) = item {
+                sublist.sort()
+            }
+        }
+        self.list.sort_by_cached_key(|item| {
+            let opt_date = match item {
+                ListItem::List(l) => l.date,
+                ListItem::Entry(e) => e.date,
+            };
+            let date_maybe = opt_date
+                .unwrap_or(DateMaybeTime::Date(chrono::naive::MAX_DATE));
+            match date_maybe {
+                DateMaybeTime::Date(date) => (date, None),
+                DateMaybeTime::DateTime(datetime) => {
+                    (datetime.naive_local().date(), Some(datetime.time()))
+                }
+            }
+        });
     }
 }
 

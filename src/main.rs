@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::Read;
 
 fn main() -> anyhow::Result<()> {
-    let matches = Command::new("later")
+    let args = Command::new("later")
         .about("Autumn's to-do list program")
         .long_about("This program allows nested lists. The index of a nested list should be given as a comma-separated list of integers starting with the top-level list index. e.g. `later add 1,3,1,2`")
         .arg(
@@ -101,63 +101,77 @@ fn main() -> anyhow::Result<()> {
                         .use_value_delimiter(true)
                         .require_value_delimiter(true),
                 ),
+            Command::new("sort")
+                .short_flag('s')
+                .about("sort a list by date")
         ])
         .get_matches();
 
-    let mut todo_file = if let Some(mut path) = dirs::data_local_dir() {
-        path.push("later");
-        path
+    // find folder + file name
+    let todo_folder = if let Some(path) = dirs::data_local_dir() {
+        path.join("later")
     } else {
+        // should never happen on common operating systems
         bail!("Could not find standard local data directory.")
     };
+    let todo_file = todo_folder.join("later.json");
+
+    // make the file and parent folders if they don't exist
     std::fs::DirBuilder::new()
         .recursive(true)
-        .create(todo_file.clone())?;
-    todo_file.push("later.json");
+        .create(todo_folder.clone())?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .read(true)
         .create(true)
         .open(&todo_file)?;
-    let mut s = String::new();
-    file.read_to_string(&mut s).with_context(|| {
+
+    let mut json = String::new();
+    file.read_to_string(&mut json).with_context(|| {
         format!("Couldn't read to-do list file ({})", &todo_file.display())
     })?;
-    let mut lists: HashMap<String, TodoList> = if s.is_empty() {
+
+    // load existing lists or make a new one
+    let mut lists: HashMap<String, TodoList> = if json.is_empty() {
         let mut m = HashMap::new();
         m.insert(String::from(DEFAULT_LIST), TodoList::default());
         println!("Generating new storage file in {}", todo_file.display());
         save(&todo_file, &m)?;
         m
     } else {
-        serde_json::from_str(&s).with_context(|| {
+        serde_json::from_str(&json).with_context(|| {
             format!("Couldn't parse to-do list file ({})", todo_file.display())
         })?
     };
-    let list_name = if matches.is_present("list-name") {
-        matches.value_of("list-name").unwrap()
+
+    // use list-name argument, otherwise use default list
+    let list_name = if args.is_present("list-name") {
+        args.value_of("list-name").unwrap()
     } else {
         if !lists.contains_key(DEFAULT_LIST) {
             lists.insert(String::from(DEFAULT_LIST), TodoList::default());
         }
         DEFAULT_LIST
     };
+
+    // get the active list struct
     let active_list =
         if let Some(list) = lists.get_mut(&String::from(list_name)) {
             list
         } else {
-            bail!("List name not found!");
+            bail!("List '{}' not found!", list_name);
         };
 
     let mut stdout = std::io::stdout();
-    match matches.subcommand() {
-        Some(("list", list_matches)) => {
-            if list_matches.is_present("add") {
-                let (title, date) =
-                    match list_matches.value_of_t::<String>("add") {
-                        Ok(title) => (title, None),
-                        Err(_) => prompt_for_info(None)?,
-                    };
+    match args.subcommand() {
+        Some(("list", list_args)) => {
+            if list_args.is_present("add") {
+                // add new list
+                let (title, date) = match list_args.value_of_t::<String>("add")
+                {
+                    Ok(title) => (title, None),
+                    Err(_) => prompt_for_info(None)?,
+                };
                 if lists.contains_key(&title) {
                     bail!("The list '{}' already exists", title);
                 }
@@ -167,16 +181,19 @@ fn main() -> anyhow::Result<()> {
                 );
                 save(&todo_file, &lists)?;
                 println!("added new to-do list: '{}'", title);
-            } else if list_matches.is_present("remove") {
-                let title: String = list_matches.value_of_t_or_exit("remove");
-                if !lists.contains_key(&title) {
+            } else if list_args.is_present("remove") {
+                // remove list
+
+                let title: String = list_args.value_of_t_or_exit("remove");
+                if title == DEFAULT_LIST {
+                    bail!("You cannot remove the default to-do list!");
+                } else if !lists.contains_key(&title) {
                     bail!(
                         "The to-do list '{}' does not currently exist",
                         title
                     );
-                } else if title == DEFAULT_LIST {
-                    bail!("You cannot remove the default to-do list!");
                 }
+
                 let mut rl = rustyline::Editor::<()>::new();
                 let confirm =
                     rl.readline(&format!("Remove list '{}'? (y/N): ", title))?;
@@ -187,12 +204,15 @@ fn main() -> anyhow::Result<()> {
                 } else {
                     bail!("Cancelled.");
                 }
-            } else if list_matches.is_present("edit") {
-                let title: String = list_matches.value_of_t_or_exit("edit");
-                if !lists.contains_key(&title) {
-                    bail!("The list '{}' does not currently exist", title);
-                }
-                let removed_list = lists.remove(&title).unwrap();
+            } else if list_args.is_present("edit") {
+                // edit list
+                let title: String = list_args.value_of_t_or_exit("edit");
+                let removed_list = match lists.remove(&title) {
+                    Some(l) => l,
+                    None => {
+                        bail!("The list '{}' does not currently exist", title)
+                    }
+                };
                 let list_item = ListItem::List(removed_list);
                 let (new_title, new_date) = prompt_for_info(Some(&list_item))?;
                 if let ListItem::List(mut l) = list_item {
@@ -200,7 +220,7 @@ fn main() -> anyhow::Result<()> {
                     l.date = new_date;
                     if lists.contains_key(&new_title) {
                         bail!(
-                            "The list '{}' already exists. Edit reverted.",
+                            "Weird, the list '{}' already exists. Edit reverted.",
                             new_title
                         );
                     }
@@ -211,35 +231,39 @@ fn main() -> anyhow::Result<()> {
             if lists.len() == 1 {
                 eprintln!("No named lists exist currently. (Use `later list --add` to create one.)");
             } else {
+                // list the lists
                 let mut v: Vec<(&String, &TodoList)> = lists.iter().collect();
                 v.sort_by_key(|(title, _)| *title);
                 v.iter()
                     .filter(|(title, _)| *title != DEFAULT_LIST)
-                    .for_each(|(_, list)| {
-                        list.write_header(&mut stdout).unwrap()
-                    });
+                    .map(
+                    |(_, list): &(&String, &TodoList)| -> std::io::Result<()> {
+                        list.write_header(&mut stdout)?;
+                        Ok(())
+                    },
+                ).collect::<std::io::Result<_>>()?;
             }
             return Ok(());
         }
-        Some(("add", add_matches)) => {
+        Some(("add", add_args)) => {
             let (name, mut index) = match (
-                add_matches.is_present("name"),
-                add_matches.is_present("index"),
+                add_args.is_present("name"),
+                add_args.is_present("index"),
             ) {
                 (true, true) => {
-                    let name: String = add_matches.value_of_t_or_exit("name");
+                    let name: String = add_args.value_of_t_or_exit("name");
                     let index: Vec<usize> =
-                        add_matches.values_of_t_or_exit("index");
+                        add_args.values_of_t_or_exit("index");
                     (Some(name), index)
                 }
                 (false, true) => {
                     let index: Result<Vec<usize>, _> =
-                        add_matches.values_of_t("index");
+                        add_args.values_of_t("index");
                     if let Ok(v) = index {
                         (None, v)
                     } else {
                         let name_pieces: Vec<String> =
-                            add_matches.values_of_t_or_exit("index");
+                            add_args.values_of_t_or_exit("index");
                         let name = name_pieces
                             .into_iter()
                             .reduce(|acc, item| acc + "," + &item)
@@ -259,9 +283,9 @@ fn main() -> anyhow::Result<()> {
             )?;
             save(&todo_file, &lists)?;
         }
-        Some(("remove", remove_matches)) => {
+        Some(("remove", remove_args)) => {
             let mut index: Vec<usize> =
-                remove_matches.values_of_t_or_exit("index");
+                remove_args.values_of_t_or_exit("index");
             let mut rl = rustyline::Editor::<()>::new();
             if match active_list.remove_item(&mut index.iter_mut())? {
                 ListItem::List(l) => {
@@ -284,18 +308,16 @@ fn main() -> anyhow::Result<()> {
                 bail!("Cancelled.");
             }
         }
-        Some(("move", move_matches)) => {
+        Some(("move", move_args)) => {
             let mut from_index: Vec<usize> =
-                move_matches.values_of_t_or_exit("from");
-            let mut to_index: Vec<usize> =
-                move_matches.values_of_t_or_exit("to");
+                move_args.values_of_t_or_exit("from");
+            let mut to_index: Vec<usize> = move_args.values_of_t_or_exit("to");
             let item = active_list.remove_item(&mut from_index.iter_mut())?;
             active_list.insert_item(item, &mut to_index.iter_mut())?;
             save(&todo_file, &lists)?;
         }
-        Some(("edit", edit_matches)) => {
-            let mut index: Vec<usize> =
-                edit_matches.values_of_t_or_exit("index");
+        Some(("edit", edit_args)) => {
+            let mut index: Vec<usize> = edit_args.values_of_t_or_exit("index");
             let item = active_list.remove_item(&mut index.iter_mut())?;
             let (new_title, new_date) = prompt_for_info(Some(&item))?;
             match item {
@@ -316,6 +338,10 @@ fn main() -> anyhow::Result<()> {
                     )?;
                 }
             }
+            save(&todo_file, &lists)?;
+        }
+        Some(("sort", _sort_args)) => {
+            active_list.sort();
             save(&todo_file, &lists)?;
         }
         _ => {}
